@@ -1,0 +1,7 @@
+# Everything Oracle-related lives in its own namespace, so it can be inspected
+# (kubectl get all -n oracle) or wiped (kubectl delete ns oracle) in one go.
+# Debezium gets its own namespace, the same separation you would use in production.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oracle

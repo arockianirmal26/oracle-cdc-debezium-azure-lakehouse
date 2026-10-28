@@ -1,0 +1,6 @@
+# Debezium runs in its own namespace, separate from the database it reads.
+# In production these are usually owned by different teams (DBA vs. data platform).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: debezium

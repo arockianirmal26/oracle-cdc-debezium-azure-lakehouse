@@ -1,0 +1,27 @@
+# Lets you deploy the whole Oracle setup with one command:
+#   kubectl apply -k k8s/oracle
+#
+# The configMapGenerator turns the files in sql/ into a ConfigMap, so the SQL
+# stays in plain .sql files you can open in DBeaver instead of being pasted
+# into YAML.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - service.yaml
+  - statefulset.yaml
+
+configMapGenerator:
+  - name: oracle-init-sql
+    namespace: oracle
+    files:
+      - sql/01_sales_schema.sql
+      - sql/02_seed_data.sql
+      - sql/03_billing_schema.sql
+      - sql/04_cdc_setup.sh
+      - sql/05_products.sql
+
+# Keep the ConfigMap name fixed (no hash suffix) so it's easy to find with kubectl.
+generatorOptions:
+  disableNameSuffixHash: true

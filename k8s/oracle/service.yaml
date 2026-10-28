@@ -1,0 +1,19 @@
+# Gives Oracle a stable in-cluster address: oracle.oracle.svc.cluster.local:1521
+# Debezium connects through this name.
+#
+# ClusterIP = reachable only from inside the cluster. From your laptop
+# (DBeaver) you go through `kubectl port-forward` (scripts/connect.sh), which
+# is closer to how a locked-down production cluster behaves than a NodePort.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle
+  namespace: oracle
+spec:
+  type: ClusterIP
+  selector:
+    app: oracle
+  ports:
+    - name: listener
+      port: 1521
+      targetPort: listener

@@ -1,0 +1,35 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+.terraform.tfstate.lock.info
+
+# databricks
+.databricks/
+
+# local runtime output
+data/
+*.log
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,99 @@
+# Oracle Database Free running as a single-replica StatefulSet.
+#
+# Why a StatefulSet and not a Deployment: a database needs a stable identity
+# (pod is always "oracle-0") and its own persistent disk that survives pod
+# restarts.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oracle
+  namespace: oracle
+spec:
+  serviceName: oracle
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oracle
+  template:
+    metadata:
+      labels:
+        app: oracle
+    spec:
+      # The image runs as the "oracle" user (uid/gid 54321). fsGroup makes the
+      # mounted volume writable for that user.
+      securityContext:
+        fsGroup: 54321
+      containers:
+        - name: oracle
+          # Regular flavor on purpose: the "slim" images strip features, and
+          # Debezium needs LogMiner. Version pinned so the setup is reproducible.
+          image: gvenzl/oracle-free:23.26.3
+          ports:
+            - name: listener
+              containerPort: 1521
+
+          # These are only read on the very first start, when the DB is created.
+          #   ORACLE_PASSWORD   -> password for SYS / SYSTEM (admin)
+          #   APP_USER          -> business schema created inside FREEPDB1.
+          #                        The SQL in sql/ expects it to be SALES.
+          #   APP_USER_PASSWORD -> its password
+          # Passwords come from the "oracle-credentials" Secret, which
+          # scripts/start.sh creates from your local .env file (never committed).
+          env:
+            - name: ORACLE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: oracle-credentials, key: ORACLE_PASSWORD }
+            - name: APP_USER
+              value: SALES
+            - name: APP_USER_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: oracle-credentials, key: APP_USER_PASSWORD }
+            # Password for the Debezium LogMiner user, used by sql/04_cdc_setup.sh
+            - name: DBZ_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: oracle-credentials, key: DBZ_PASSWORD }
+
+          # Oracle Free caps itself at 2 CPUs and ~2 GB RAM, so these limits
+          # leave some headroom without starving the rest of minikube.
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+            limits: { cpu: "2", memory: 4Gi }
+
+          # First start creates the database from scratch, which can take
+          # several minutes. The startupProbe gives it up to 10 min before
+          # Kubernetes gives up; after that the readinessProbe takes over.
+          # healthcheck.sh ships with the image and checks the DB is open.
+          startupProbe:
+            exec: { command: ["healthcheck.sh"] }
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec: { command: ["healthcheck.sh"] }
+            periodSeconds: 15
+            timeoutSeconds: 10
+
+          volumeMounts:
+            # Datafiles, redo logs and archived logs live here.
+            - name: oradata
+              mountPath: /opt/oracle/oradata
+            # SQL files from the ConfigMap. The image runs everything in this
+            # folder once, right after the database is first created.
+            - name: init-sql
+              mountPath: /container-entrypoint-initdb.d
+              readOnly: true
+
+      volumes:
+        - name: init-sql
+          configMap:
+            name: oracle-init-sql
+
+  # One PersistentVolumeClaim per pod (here: just oracle-0). Data survives
+  # pod restarts and "minikube stop"; only scripts/reset.sh deletes it.
+  volumeClaimTemplates:
+    - metadata:
+        name: oradata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

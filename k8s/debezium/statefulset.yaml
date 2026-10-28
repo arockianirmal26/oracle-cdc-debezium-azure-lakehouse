@@ -1,0 +1,91 @@
+# Debezium Server as a single-replica StatefulSet.
+#
+# Why a StatefulSet: Debezium is stateful. It stores the last processed SCN
+# (offsets) and the table structures it has seen (schema history) in files.
+# They must survive restarts, otherwise every restart re-snapshots all tables.
+#
+# Exactly one replica: a second instance with the same config would read the
+# same redo and send every change twice.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: debezium
+  namespace: debezium
+spec:
+  serviceName: debezium
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debezium
+  template:
+    metadata:
+      labels:
+        app: debezium
+    spec:
+      # The image runs as uid 185 (jboss), gid 0. fsGroup makes the data volume writable.
+      securityContext:
+        fsGroup: 185
+      containers:
+        - name: debezium
+          # Ships with the Oracle connector, the Oracle JDBC driver (ojdbc11 23.x)
+          # and the Event Hubs sink, so no custom image is needed.
+          image: quay.io/debezium/server:3.6.2.Final
+          ports:
+            - name: http
+              containerPort: 8080
+
+          # Secrets, referenced as ${DBZ_PASSWORD} / ${EH_CONNECTION_STRING}
+          # in application.properties.
+          env:
+            - name: DBZ_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: debezium-credentials, key: DBZ_PASSWORD }
+            - name: EH_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef: { name: debezium-credentials, key: EH_CONNECTION_STRING }
+            # Let the JVM size its heap from the container limit instead of the node's RAM.
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=75"
+
+          # Kept small: Debezium shares the node with Oracle on a 4-CPU / 6 GB minikube.
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+
+          # Debezium Server exposes MicroProfile Health on :8080.
+          # Startup allows time for the initial snapshot to begin.
+          startupProbe:
+            httpGet: { path: /q/health/started, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /q/health/ready, port: http }
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /q/health/live, port: http }
+            periodSeconds: 30
+            failureThreshold: 4
+
+          volumeMounts:
+            # Mount only the one file, so the image's other config files stay in place.
+            - name: config
+              mountPath: /debezium/config/application.properties
+              subPath: application.properties
+              readOnly: true
+            # offsets.dat and schema-history.dat
+            - name: data
+              mountPath: /debezium/data
+
+      volumes:
+        - name: config
+          configMap:
+            name: debezium-config
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

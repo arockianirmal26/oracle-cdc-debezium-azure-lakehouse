@@ -1,0 +1,18 @@
+# Deploys Debezium Server:  kubectl apply -k k8s/debezium
+# The Secret "debezium-credentials" is created separately by
+# scripts/deploy-debezium.sh, because its values come from .env and Terraform.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - statefulset.yaml
+
+# application.properties → ConfigMap. Here the hash suffix is kept on purpose:
+# when the file changes, the ConfigMap gets a new name, the StatefulSet
+# reference changes with it, and Kubernetes restarts the pod with the new config.
+configMapGenerator:
+  - name: debezium-config
+    namespace: debezium
+    files:
+      - application.properties
